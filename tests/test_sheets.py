@@ -134,6 +134,22 @@ def _fake_versions(monkeypatch, versions):
     monkeypatch.setattr(sheets, "musescore_version", lambda b: versions.get(b))
 
 
+def test_find_musescore_in_windows_program_files(tmp_path, monkeypatch):
+    binary = tmp_path / "Program Files" / "MuseScore 4" / "bin" / "MuseScore4.exe"
+    binary.parent.mkdir(parents=True)
+    binary.touch()
+    monkeypatch.delenv(sheets.MUSESCORE_ENV_VAR, raising=False)
+    monkeypatch.setattr(sheets.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(sheets.shutil, "which", lambda name: None)
+    monkeypatch.setattr(sheets, "_APP_LOCATIONS", ())
+    for variable in ("ProgramW6432", "ProgramFiles", "ProgramFiles(x86)"):
+        monkeypatch.setenv(variable, str(tmp_path / "Program Files"))
+    _fake_versions(monkeypatch, {str(binary): (4, 7, 4)})
+
+    assert sheets._candidates() == [str(binary)]
+    assert sheets.find_musescore() == str(binary)
+
+
 def test_find_musescore_skips_versions_that_are_too_old(monkeypatch):
     monkeypatch.delenv(sheets.MUSESCORE_ENV_VAR, raising=False)
     monkeypatch.setattr(sheets, "_candidates", lambda: ["/old", "/new"])

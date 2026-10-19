@@ -126,14 +126,22 @@ def _candidates() -> list[str]:
         path = Path(location).expanduser()
         if path.is_file():
             found.append(str(path))
+    if platform.system() == "Windows":
+        for variable in ("ProgramW6432", "ProgramFiles", "ProgramFiles(x86)"):
+            root = os.environ.get(variable)
+            if not root:
+                continue
+            path = Path(root) / "MuseScore 4" / "bin" / "MuseScore4.exe"
+            if path.is_file() and str(path) not in found:
+                found.append(str(path))
     return found
 
 
 def find_musescore() -> str:
     """Path to a MuseScore 4+ executable.
 
-    Checks $MUSCRIPTOR_MUSESCORE first, then PATH, then the places the macOS
-    and Linux downloads put it, and returns the first one new enough to use.
+    Checks $MUSCRIPTOR_MUSESCORE first, then PATH, then the standard Windows,
+    macOS and Linux install locations, returning the first one new enough to use.
     Raises MuseScoreNotFoundError — naming any too-old MuseScore it did find,
     since "not found" is a confusing thing to read with `mscore` on your PATH.
     """

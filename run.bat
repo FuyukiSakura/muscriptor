@@ -1,0 +1,1 @@
+uv run muscriptor serve --model large --device cuda --host 0.0.0.0 --port 8222
