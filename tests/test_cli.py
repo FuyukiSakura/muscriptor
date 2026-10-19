@@ -203,3 +203,34 @@ def test_instruments_passed_to_model(patched_model, fake_audio):
     )
     assert result.exit_code == 0, result.stderr
     assert _FakeModel.last_kwargs["instruments"] == ["violin", "drums"]
+
+
+def test_youtube_url_is_downloaded_then_transcribed(
+    patched_model, fake_audio, tmp_path, monkeypatch
+):
+    seen = {}
+
+    def fake_download(url, dest_dir):
+        seen["url"] = url
+        return fake_audio
+
+    monkeypatch.setattr(main_mod, "download_youtube_audio", fake_download)
+    out = tmp_path / "out.mid"
+    result = CliRunner().invoke(
+        main_mod.app,
+        ["transcribe", "https://youtu.be/jNQXAC9IVRw", "-o", str(out)],
+    )
+    assert result.exit_code == 0, result.output
+    assert seen["url"] == "https://youtu.be/jNQXAC9IVRw"
+    assert _FakeModel.last_kwargs["audio"] == fake_audio
+    assert out.read_bytes() == b"FAKE_MIDI"
+
+
+def test_youtube_download_error_is_reported(patched_model, monkeypatch):
+    def fake_download(url, dest_dir):
+        raise main_mod.YouTubeDownloadError("Video unavailable")
+
+    monkeypatch.setattr(main_mod, "download_youtube_audio", fake_download)
+    result = CliRunner().invoke(main_mod.app, ["transcribe", "https://youtu.be/xxx"])
+    assert result.exit_code == 1
+    assert "Video unavailable" in result.output

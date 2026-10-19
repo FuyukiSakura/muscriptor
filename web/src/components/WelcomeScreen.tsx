@@ -47,6 +47,10 @@ export function WelcomeScreen(props: {
   onPickFile: (file: File) => void;
   /** Loads the bundled demo track + its suggested conditioning. */
   onUseExample: () => Promise<void>;
+  /** Downloads the audio of a YouTube link (server side) and picks it. */
+  onUseYouTube: (url: string) => void;
+  /** True while that download is running. */
+  fetchingYouTube: boolean;
   condSelected: Set<string>;
   onCondChange: (next: Set<string>) => void;
   onTranscribe: () => void;
@@ -65,6 +69,8 @@ export function WelcomeScreen(props: {
     selectedFile,
     onPickFile,
     onUseExample,
+    onUseYouTube,
+    fetchingYouTube,
     condSelected,
     onCondChange,
     onTranscribe,
@@ -76,6 +82,7 @@ export function WelcomeScreen(props: {
   } = props;
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [loadingExample, setLoadingExample] = useState(false);
+  const [youtubeUrl, setYoutubeUrl] = useState("");
   const retryIn = useCountdown(submitState.phase === "busy" ? submitState.retryAt : null);
   const submitting = submitState.phase !== "idle";
 
@@ -162,9 +169,36 @@ export function WelcomeScreen(props: {
               pad="px-7 py-3"
               className="rounded-xl border-transparent bg-content font-semibold text-[#15151b] hover:border-transparent hover:bg-white"
               onClick={() => fileInputRef.current?.click()}
+              disabled={fetchingYouTube}
             >
               Select an audio file
             </Button>
+            {/* Loads as soon as a link is pasted in, or on Enter after typing. */}
+            <input
+              type="url"
+              className="w-full max-w-sm rounded-xl border border-line-strong bg-surface-2 px-4 py-2.5 text-center font-sans text-sm text-content outline-none placeholder:text-muted focus:border-muted disabled:opacity-60"
+              placeholder={
+                fetchingYouTube ? "Downloading audio from YouTube…" : "or paste a YouTube link"
+              }
+              aria-label="YouTube link"
+              value={fetchingYouTube ? "" : youtubeUrl}
+              disabled={fetchingYouTube}
+              autoComplete="off"
+              spellCheck={false}
+              onChange={(e) => setYoutubeUrl(e.target.value)}
+              onPaste={(e) => {
+                const url = e.clipboardData.getData("text").trim();
+                if (url === "") return;
+                e.preventDefault();
+                setYoutubeUrl("");
+                onUseYouTube(url);
+              }}
+              onKeyDown={(e) => {
+                if (e.key !== "Enter" || youtubeUrl.trim() === "") return;
+                onUseYouTube(youtubeUrl.trim());
+                setYoutubeUrl("");
+              }}
+            />
             <Button
               kind="ghost"
               className="px-1 py-0.5 text-sm text-muted underline underline-offset-4 hover:bg-transparent enabled:hover:text-content"

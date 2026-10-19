@@ -30,6 +30,25 @@ import { ProgressEstimator, formatClock } from "./progress";
 
 type Screen = "welcome" | "transcribe";
 
+// Same hosts the server accepts (muscriptor/utils/youtube.py).
+const YOUTUBE_HOSTS = new Set([
+  "youtube.com",
+  "www.youtube.com",
+  "m.youtube.com",
+  "music.youtube.com",
+  "youtu.be",
+  "www.youtube-nocookie.com",
+]);
+
+function isYouTubeUrl(s: string): boolean {
+  try {
+    const u = new URL(s);
+    return (u.protocol === "http:" || u.protocol === "https:") && YOUTUBE_HOSTS.has(u.hostname);
+  } catch {
+    return false;
+  }
+}
+
 /**
  * What has happened to the upload since "Transcribe" was clicked. The welcome
  * screen stays put until the server accepts the request, so a server that is
@@ -90,6 +109,8 @@ export function App() {
   // True while a file is being dragged over the window. On the welcome screen
   // this swaps the panel's prompt in place instead of showing the overlay.
   const [dragging, setDragging] = useState(false);
+  // True while the audio of a YouTube link is being downloaded.
+  const [fetchingYouTube, setFetchingYouTube] = useState(false);
 
   // Mirror of the selected conditioning set, read at submit time without
   // re-creating `transcribe` whenever the selection changes.
@@ -197,6 +218,49 @@ export function App() {
     setCondSelected(new Set(EXAMPLE.conditioning));
     pickFile(file);
   }
+
+  // Have the server download a YouTube video's audio, then pick it like any
+  // local file, named after the video title the server sends back. A failure
+  // (unavailable video, too long, …) is reported like an undecodable file.
+  async function useYouTube(url: string) {
+    if (fetchingYouTube) return;
+    if (!isYouTubeUrl(url)) {
+      setError({ kind: "file", message: "That doesn't look like a YouTube link." });
+      return;
+    }
+    setError((prev) => (prev?.kind === "file" ? null : prev));
+    setFetchingYouTube(true);
+    try {
+      const body = new FormData();
+      body.append("url", url);
+      const resp = await fetch("/youtube", { method: "POST", body }).catch(() => {
+        throw new Error("Couldn't reach the server to download from YouTube.");
+      });
+      if (!resp.ok) {
+        // The server's explanation stands on its own ("could not download from
+        // YouTube: …", "the video is longer than …").
+        let detail = `Couldn't get the audio from YouTube (HTTP ${resp.status}).`;
+        try {
+          const d: unknown = (await resp.json()).detail;
+          if (typeof d === "string") detail = d.charAt(0).toUpperCase() + d.slice(1);
+        } catch {
+          // Not a JSON error body (e.g. a proxy's error page); keep the status.
+        }
+        throw new Error(detail);
+      }
+      const blob = await resp.blob();
+      const encoded = resp.headers
+        .get("Content-Disposition")
+        ?.match(/filename\*=UTF-8''([^;]+)/)?.[1];
+      const filename = encoded ? decodeURIComponent(encoded) : "youtube.mp3";
+      pickFile(new File([blob], filename, { type: "audio/mpeg" }));
+    } catch (e) {
+      setError({ kind: "file", message: (e as Error).message });
+    } finally {
+      setFetchingYouTube(false);
+    }
+  }
+
 
   // A file dropped anywhere on the page selects it on the welcome screen, from
   // either screen — dropping while a transcription is showing returns you to the
@@ -392,6 +456,8 @@ export function App() {
             selectedFile={selectedFile}
             onPickFile={pickFile}
             onUseExample={useExample}
+            onUseYouTube={useYouTube}
+            fetchingYouTube={fetchingYouTube}
             condSelected={condSelected}
             onCondChange={setCondSelected}
             onTranscribe={startTranscription}

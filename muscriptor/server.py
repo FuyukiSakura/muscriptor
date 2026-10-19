@@ -21,6 +21,12 @@ POST /sheets takes a MIDI upload instead of audio (the `quantized_midi` from
 `muscriptor.utils.sheets.write_sheets` engraves from it — MusicXML, the full
 score, one PDF per instrument — as a single uncompressed zip. It needs
 MuseScore 4+ on the server, and answers 503 when there is none.
+
+POST /youtube takes a YouTube video URL (form field `url`) and returns its
+audio as `audio/mpeg`, named after the video title in `Content-Disposition`,
+for the client to submit to /transcribe like an uploaded file. It needs yt-dlp
+and ffmpeg on the server. Videos longer than 15 minutes and live streams are
+rejected with 413, videos yt-dlp can't fetch with 422.
 """
 
 import asyncio
@@ -32,6 +38,7 @@ import os
 import tempfile
 import threading
 import time
+import urllib.parse
 import wave
 import zipfile
 from pathlib import Path
@@ -53,6 +60,12 @@ from muscriptor.utils.sheets import (
     MuseScoreError,
     MuseScoreNotFoundError,
     write_sheets,
+)
+from muscriptor.utils.youtube import (
+    YouTubeDownloadError,
+    YouTubeVideoTooLongError,
+    download_youtube_audio,
+    is_youtube_url,
 )
 
 
@@ -78,6 +91,8 @@ def _make_release_once(lock: threading.Lock):
 
 
 _MAX_TRANSCRIBE_MIDI_DURATION_S = 15 * 60
+
+_MAX_YOUTUBE_DURATION_S = 15 * 60
 
 SHEETS_ZIP_NAME = "sheets.zip"
 
@@ -214,6 +229,33 @@ def create_app(model: TranscriptionModel, web_dir: str | Path | None = None) -> 
         """
         path = await asyncio.to_thread(download_if_necessary, SF3_URL)
         return FileResponse(path, media_type="application/octet-stream")
+
+    @app.post("/youtube")
+    async def youtube(url: Annotated[str, Form()]) -> Response:
+        """Download the audio of a YouTube video and return it as MP3.
+
+        The client then submits it to /transcribe like any picked file, and
+        keeps it to play the original audio back.
+        """
+        if not is_youtube_url(url):
+            raise HTTPException(status_code=400, detail="not a YouTube URL")
+        with tempfile.TemporaryDirectory(prefix="muscriptor-youtube-") as tmp:
+            try:
+                path = await asyncio.to_thread(
+                    download_youtube_audio, url, tmp, _MAX_YOUTUBE_DURATION_S
+                )
+            except YouTubeVideoTooLongError as e:
+                raise HTTPException(status_code=413, detail=str(e)) from e
+            except YouTubeDownloadError as e:
+                raise HTTPException(status_code=422, detail=str(e)) from e
+            audio_bytes = path.read_bytes()
+        # The title can be any Unicode, so it goes in the RFC 5987 form.
+        filename = urllib.parse.quote(path.name)
+        return Response(
+            content=audio_bytes,
+            media_type="audio/mpeg",
+            headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"},
+        )
 
     @app.post("/transcribe")
     async def transcribe(

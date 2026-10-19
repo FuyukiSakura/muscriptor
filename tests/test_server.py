@@ -648,3 +648,49 @@ def test_sheets_engraves_concurrently(monkeypatch):
     gate.set()
     a.join(timeout=10)
     assert out["first"] == 200
+
+
+def test_youtube_returns_mp3_named_after_title(monkeypatch, tmp_path):
+    def fake_download(url, dest_dir, max_duration_s):
+        p = Path(dest_dir) / "Café song [abc].mp3"
+        p.write_bytes(b"MP3")
+        return p
+
+    monkeypatch.setattr(server_module, "download_youtube_audio", fake_download)
+    client = TestClient(create_app(make_model()))
+    resp = client.post("/youtube", data={"url": "https://youtu.be/abc"})
+    assert resp.status_code == 200
+    assert resp.content == b"MP3"
+    assert resp.headers["content-type"] == "audio/mpeg"
+    assert (
+        "filename*=UTF-8''Caf%C3%A9%20song%20%5Babc%5D.mp3"
+        in (resp.headers["content-disposition"])
+    )
+
+
+def test_youtube_rejects_non_youtube_url(monkeypatch):
+    def fake_download(*args):
+        raise AssertionError("must not download")
+
+    monkeypatch.setattr(server_module, "download_youtube_audio", fake_download)
+    client = TestClient(create_app(make_model()))
+    resp = client.post("/youtube", data={"url": "http://169.254.169.254/latest"})
+    assert resp.status_code == 400
+
+
+def test_youtube_errors_map_to_status(monkeypatch):
+    from muscriptor.utils.youtube import YouTubeDownloadError, YouTubeVideoTooLongError
+
+    client = TestClient(create_app(make_model()))
+    for exc, status in [
+        (YouTubeVideoTooLongError("too long"), 413),
+        (YouTubeDownloadError("Video unavailable"), 422),
+    ]:
+
+        def fake_download(*args, exc=exc):
+            raise exc
+
+        monkeypatch.setattr(server_module, "download_youtube_audio", fake_download)
+        resp = client.post("/youtube", data={"url": "https://youtu.be/abc"})
+        assert resp.status_code == status
+        assert resp.json()["detail"] == str(exc)

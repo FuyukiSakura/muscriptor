@@ -16,6 +16,7 @@ export default defineConfig({
         "/sheets",
         "/health",
         "/soundfonts",
+        "/youtube",
       ].map((path) => [
         path,
         { target: backend, changeOrigin: true, secure: true },

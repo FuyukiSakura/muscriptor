@@ -24,6 +24,11 @@ from muscriptor.utils.sheets import (
     prepare_output_dir,
     write_sheets,
 )
+from muscriptor.utils.youtube import (
+    YouTubeDownloadError,
+    download_youtube_audio,
+    is_youtube_url,
+)
 
 app = typer.Typer(add_completion=False, help="muscriptor — audio-to-MIDI transcription")
 
@@ -40,6 +45,25 @@ def _load_model(
     except ModelDownloadError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
+
+
+def _resolve_audio_input(audio_input: str) -> Path:
+    """The local audio file to transcribe: `audio_input` itself, or for a
+    YouTube URL, its audio downloaded into the current directory."""
+    if is_youtube_url(audio_input):
+        typer.echo(f"Downloading audio from {audio_input} …", err=True)
+        try:
+            audio_file = download_youtube_audio(audio_input, Path.cwd())
+        except YouTubeDownloadError as e:
+            typer.echo(f"Error: {e}", err=True)
+            raise typer.Exit(1)
+        typer.echo(f"Saved audio to {audio_file}", err=True)
+        return audio_file
+    audio_file = Path(audio_input)
+    if not audio_file.exists():
+        typer.echo(f"Error: file not found: {audio_file}", err=True)
+        raise typer.Exit(1)
+    return audio_file
 
 
 class OutputFormat(str, Enum):
@@ -78,8 +102,17 @@ def _event_to_dict(ev: NoteStartEvent | NoteEndEvent) -> dict:
 
 @app.command()
 def transcribe(
-    audio_file: Annotated[
-        Path, typer.Argument(help="Input audio file (wav, mp3, flac, …)")
+    audio_input: Annotated[
+        str,
+        typer.Argument(
+            metavar="AUDIO_FILE",
+            help=(
+                "Input audio file (wav, mp3, flac, …), or a YouTube video URL: "
+                "its audio is downloaded with yt-dlp (needs yt-dlp and ffmpeg "
+                "on PATH) into the current directory as MP3, and treated as "
+                "the input file from then on."
+            ),
+        ),
     ],
     output: Annotated[
         Path | None,
@@ -255,10 +288,6 @@ def transcribe(
             raise typer.Exit(1)
         typer.echo(f"Instruments: {', '.join(instrument_names)}", err=True)
 
-    if not audio_file.exists():
-        typer.echo(f"Error: file not found: {audio_file}", err=True)
-        raise typer.Exit(1)
-
     if prelude_forcing and batch_size is not None and batch_size != 1:
         typer.echo(
             f"Error: --batch-size {batch_size} requires --no-prelude-forcing: "
@@ -267,6 +296,10 @@ def transcribe(
             err=True,
         )
         raise typer.Exit(1)
+
+    # Fetched after the cheap argument checks above, so a typo there doesn't
+    # cost a download.
+    audio_file = _resolve_audio_input(audio_input)
 
     is_stdout = output is not None and str(output) == "-"
 

@@ -80,6 +80,20 @@ uvx muscriptor transcribe path/to/audio_file.wav
 
 See `--help` for all the options.
 
+### From YouTube
+
+Instead of a file, you can give a YouTube video URL: in the web UI, paste it into the
+"or paste a YouTube link" field under the file button; with the CLI, pass it in place of the file:
+
+```bash
+uvx muscriptor transcribe "https://www.youtube.com/watch?v=..."
+```
+
+The audio is downloaded with [yt-dlp](https://github.com/yt-dlp/yt-dlp), which needs to be
+installed separately together with [ffmpeg](https://ffmpeg.org/download.html). The CLI saves the
+audio as MP3 in the current directory, and writes its outputs next to it. The web UI limits
+videos to 15 minutes.
+
 ### Sheet music
 
 Using the CLI with `--format sheets` engraves the transcription as readable notation instead of
